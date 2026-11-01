@@ -1,0 +1,286 @@
+' Line tokens retain their LF terminator. A CR before LF is retained as content.
+Private Function Exact(leftText As String, rightText As String) As Boolean
+    Return String.Compare(leftText, rightText, True) = 0
+End Function
+
+Private Function Lines(text As String) As Array Of String
+    Dim tokens() As String
+    If String.LenBytes(text) = 0 Then Return tokens
+    Dim pieces As Array Of String = String.Split(text, "\n")
+    For i As Integer = 0 To Array.Count(pieces) - 1
+        If i < Array.Count(pieces) - 1 Then
+            Array.Append(tokens, pieces(i) + "\n")
+        ElseIf String.LenBytes(pieces(i)) > 0 Then
+            Array.Append(tokens, pieces(i))
+        End If
+    Next
+    Return tokens
+End Function
+
+''' A contiguous change. Coordinates are zero-based line boundaries; arrays include terminators.
+Public Class LineHunk
+    Private Property OldOffset As Integer
+    Private Property NewOffset As Integer
+    Private Property Removed As Array Of String
+    Private Property Added As Array Of String
+
+    Internal Sub Constructor(oldStart As Integer, newStart As Integer, oldLines As Array Of String, newLines As Array Of String)
+        Me.OldOffset = oldStart
+        Me.NewOffset = newStart
+        Me.Removed = Array.Clone(oldLines)
+        Me.Added = Array.Clone(newLines)
+    End Sub
+
+    Public Property OldStart As Integer
+        Get
+            Return Me.OldOffset
+        End Get
+    End Property
+    Public Property NewStart As Integer
+        Get
+            Return Me.NewOffset
+        End Get
+    End Property
+    Public Property OldCount As Integer
+        Get
+            Return Array.Count(Me.Removed)
+        End Get
+    End Property
+    Public Property NewCount As Integer
+        Get
+            Return Array.Count(Me.Added)
+        End Get
+    End Property
+    Public Property OldLines As Array Of String
+        Get
+            Return Array.Clone(Me.Removed)
+        End Get
+    End Property
+    Public Property NewLines As Array Of String
+        Get
+            Return Array.Clone(Me.Added)
+        End Get
+    End Property
+End Class
+
+Private Class Operation
+    Public Property Kind As Integer
+    Public Property Text As String
+    Public Property OldBefore As Integer
+    Public Property NewBefore As Integer
+
+    Public Sub Constructor(kind As Integer, text As String, oldBefore As Integer, newBefore As Integer)
+        Me.Kind = kind
+        Me.Text = text
+        Me.OldBefore = oldBefore
+        Me.NewBefore = newBefore
+    End Sub
+End Class
+
+''' Exact-source line diff. Build with DiffLines; instances and their hunks are immutable.
+Public Class TextDiff
+    Private Property Original As String
+    Private Property Changes As Array Of LineHunk
+    Private Property Steps As Array Of Operation
+
+    Internal Sub Constructor(original As String, changes As Array Of LineHunk, steps As Array Of Operation)
+        Me.Original = original
+        Me.Changes = changes
+        Me.Steps = steps
+    End Sub
+
+    Public Property Hunks As Array Of LineHunk
+        Get
+            Return Array.Clone(Me.Changes)
+        End Get
+    End Property
+
+    Public Property HasChanges As Boolean
+        Get
+            Return Array.Count(Me.Changes) > 0
+        End Get
+    End Property
+
+    ''' Reconstruct using the hunks, refusing any source other than the exact diff base.
+    Public Function ApplyTo(source As String) As String
+        If Not Exact(source, Me.Original) Then Throw New InvalidArgumentException("Diff base does not match source")
+        Dim sourceLines As Array Of String = Lines(source)
+        Dim output() As String
+        Dim cursor As Integer = 0
+        For Each hunk As LineHunk In Me.Changes
+            While cursor < hunk.OldStart
+                Array.Append(output, sourceLines(cursor))
+                cursor += 1
+            End While
+            For Each addedLine As String In hunk.NewLines
+                Array.Append(output, addedLine)
+            Next
+            cursor += hunk.OldCount
+        Next
+        While cursor < Array.Count(sourceLines)
+            Array.Append(output, sourceLines(cursor))
+            cursor += 1
+        End While
+        Return String.Join(output, "")
+    End Function
+
+    Private Function RangeText(startLine As Integer, count As Integer) As String
+        If count = 0 Then Return String.From(startLine) + ",0"
+        If count = 1 Then Return String.From(startLine + 1)
+        Return String.From(startLine + 1) + "," + String.From(count)
+    End Function
+
+    Private Function PatchLine(stepItem As Operation) As String
+        Dim prefix As String = " "
+        If stepItem.Kind = -1 Then prefix = "-"
+        If stepItem.Kind = 1 Then prefix = "+"
+        Dim text As String = prefix + stepItem.Text
+        If Not String.EndsWith(stepItem.Text, "\n", True) Then
+            text += "\n\\ No newline at end of file\n"
+        End If
+        Return text
+    End Function
+
+    ''' GNU-compatible unified hunks. Headers reject newlines/tabs; zero context is supported.
+    Public Function UnifiedDiff(oldLabel As String = "a/file", newLabel As String = "b/file", context As Integer = 3) As String
+        If context < 0 Or context > 1000000 Then Throw New InvalidArgumentException("Context must be between zero and one million")
+        If String.Contains(oldLabel, "\n") Or String.Contains(oldLabel, "\r") Or String.Contains(oldLabel, "\t") Or String.Contains(newLabel, "\n") Or String.Contains(newLabel, "\r") Or String.Contains(newLabel, "\t") Then Throw New InvalidArgumentException("Patch labels cannot contain line breaks or tabs")
+        If Not Me.HasChanges Then Return ""
+        Dim output() As String
+        Array.Append(output, "--- " + oldLabel + "\n+++ " + newLabel + "\n")
+        Dim total As Integer = Array.Count(Me.Steps)
+        Dim scan As Integer = 0
+        While scan < total
+            While scan < total And Me.Steps(scan).Kind = 0
+                scan += 1
+            End While
+            If scan = total Then Exit While
+            Dim beginIndex As Integer = scan - context
+            If beginIndex < 0 Then beginIndex = 0
+            Dim finishIndex As Integer = scan + 1
+            Dim equalRun As Integer = 0
+            scan += 1
+            While scan < total
+                If Me.Steps(scan).Kind = 0 Then
+                    equalRun += 1
+                    If equalRun > context * 2 Then Exit While
+                Else
+                    equalRun = 0
+                    finishIndex = scan + 1
+                End If
+                scan += 1
+            End While
+            finishIndex += context
+            If finishIndex > total Then finishIndex = total
+            Dim oldCount As Integer = 0
+            Dim newCount As Integer = 0
+            For i As Integer = beginIndex To finishIndex - 1
+                If Me.Steps(i).Kind <> 1 Then oldCount += 1
+                If Me.Steps(i).Kind <> -1 Then newCount += 1
+            Next
+            Array.Append(output, "@@ -" + Me.RangeText(Me.Steps(beginIndex).OldBefore, oldCount) + " +" + Me.RangeText(Me.Steps(beginIndex).NewBefore, newCount) + " @@\n")
+            For i As Integer = beginIndex To finishIndex - 1
+                Array.Append(output, Me.PatchLine(Me.Steps(i)))
+            Next
+            scan = finishIndex
+        End While
+        Return String.Join(output, "")
+    End Function
+End Class
+
+''' Minimal line edit script via bounded LCS after trimming common prefix/suffix.
+Public Function DiffLines(oldText As String, newText As String, maxCells As Integer = 1000000) As TextDiff
+    If maxCells < 1 Or maxCells > 10000000 Then Throw New InvalidArgumentException("LCS cell budget must be 1..10000000")
+    Dim oldLines As Array Of String = Lines(oldText)
+    Dim newLines As Array Of String = Lines(newText)
+    Dim oldSize As Integer = Array.Count(oldLines)
+    Dim newSize As Integer = Array.Count(newLines)
+    Dim prefixCount As Integer = 0
+    While prefixCount < oldSize And prefixCount < newSize
+        If Not Exact(oldLines(prefixCount), newLines(prefixCount)) Then Exit While
+        prefixCount += 1
+    End While
+    Dim suffixCount As Integer = 0
+    While suffixCount < oldSize - prefixCount And suffixCount < newSize - prefixCount
+        If Not Exact(oldLines(oldSize - suffixCount - 1), newLines(newSize - suffixCount - 1)) Then Exit While
+        suffixCount += 1
+    End While
+    Dim oldMiddle As Integer = oldSize - prefixCount - suffixCount
+    Dim newMiddle As Integer = newSize - prefixCount - suffixCount
+    Dim width As Integer = newMiddle + 1
+    If oldMiddle > 0 And newMiddle > 0 Then
+        If oldMiddle + 1 > maxCells \ width Then Throw New InvalidArgumentException("Diff exceeds LCS cell budget; increase maxCells or compare smaller regions")
+    End If
+    Dim table() As Integer
+    If oldMiddle > 0 And newMiddle > 0 Then
+        Array.ResizeTo(table, (oldMiddle + 1) * width)
+        For i As Integer = oldMiddle - 1 To 0 Step -1
+            For j As Integer = newMiddle - 1 To 0 Step -1
+                Dim index As Integer = i * width + j
+                If Exact(oldLines(prefixCount + i), newLines(prefixCount + j)) Then
+                    table(index) = table((i + 1) * width + j + 1) + 1
+                Else
+                    table(index) = table((i + 1) * width + j)
+                    If table(i * width + j + 1) > table(index) Then table(index) = table(i * width + j + 1)
+                End If
+            Next
+        Next
+    End If
+    Dim steps() As Operation
+    Dim oldCursor As Integer = 0
+    Dim newCursor As Integer = 0
+    For i As Integer = 0 To prefixCount - 1
+        Array.Append(steps, New Operation(0, oldLines(i), oldCursor, newCursor))
+        oldCursor += 1
+        newCursor += 1
+    Next
+    Dim oldStop As Integer = oldSize - suffixCount
+    Dim newStop As Integer = newSize - suffixCount
+    While oldCursor < oldStop Or newCursor < newStop
+        Dim choose As Integer = 0
+        If oldCursor = oldStop Then
+            choose = 1
+        ElseIf newCursor = newStop Then
+            choose = -1
+        ElseIf Exact(oldLines(oldCursor), newLines(newCursor)) Then
+            choose = 0
+        ElseIf table((oldCursor - prefixCount + 1) * width + newCursor - prefixCount) >= table((oldCursor - prefixCount) * width + newCursor - prefixCount + 1) Then
+            choose = -1
+        Else
+            choose = 1
+        End If
+        Dim lineText As String
+        If choose = 1 Then
+            lineText = newLines(newCursor)
+        Else
+            lineText = oldLines(oldCursor)
+        End If
+        Array.Append(steps, New Operation(choose, lineText, oldCursor, newCursor))
+        If choose <> 1 Then oldCursor += 1
+        If choose <> -1 Then newCursor += 1
+    End While
+    For i As Integer = 0 To suffixCount - 1
+        Array.Append(steps, New Operation(0, oldLines(oldCursor), oldCursor, newCursor))
+        oldCursor += 1
+        newCursor += 1
+    Next
+    Dim changes() As LineHunk
+    Dim scan As Integer = 0
+    While scan < Array.Count(steps)
+        If steps(scan).Kind = 0 Then
+            scan += 1
+            Continue While
+        End If
+        Dim oldBegin As Integer = steps(scan).OldBefore
+        Dim newBegin As Integer = steps(scan).NewBefore
+        Dim removed() As String
+        Dim added() As String
+        While scan < Array.Count(steps) And steps(scan).Kind <> 0
+            If steps(scan).Kind = -1 Then Array.Append(removed, steps(scan).Text)
+            If steps(scan).Kind = 1 Then Array.Append(added, steps(scan).Text)
+            scan += 1
+        End While
+        Array.Append(changes, New LineHunk(oldBegin, newBegin, removed, added))
+    End While
+    Return New TextDiff(oldText, changes, steps)
+End Function

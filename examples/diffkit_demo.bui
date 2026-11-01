@@ -1,0 +1,11 @@
+Import diffkit
+
+Sub Main()
+    Dim beforeText As String = "Sub Main()\n    Print \"Hello\"\nEnd Sub\n"
+    Dim afterText As String = "Sub Main()\n    Print \"Hello, Buoy Studio\"\nEnd Sub\n"
+    Dim delta As TextDiff = DiffLines(beforeText, afterText)
+    Print delta.UnifiedDiff("a/main.bui", "b/main.bui")
+    For Each hunk As LineHunk In delta.Hunks
+        Print "Changed old line " + String.From(hunk.OldStart) + ": " + String.From(hunk.OldCount) + " -> " + String.From(hunk.NewCount)
+    Next
+End Sub
