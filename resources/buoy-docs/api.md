@@ -36,5 +36,4 @@ The algorithm chooses a minimal insertion/deletion script. Equal LCS choices pre
 
 [Getting started](getting-started.md) · [Package overview](index.md)
 
-
 [Full typed API: properties, parameters, defaults, and returns](typed-api.md)

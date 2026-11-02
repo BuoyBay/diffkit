@@ -15,7 +15,7 @@ Copy `diffkit-0.1.0.buipkg` into `packages/`, then import `diffkit`.
 
 Keep the original text together with the diff. `ApplyTo` deliberately rejects a stale base instead of searching for a nearby place to apply the change.
 
-```buoy
+```basic
 Import diffkit
 
 Sub Main()

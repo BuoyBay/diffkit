@@ -81,8 +81,6 @@ GNU-compatible unified hunks. Headers reject newlines/tabs; zero context is supp
 | --- |
 | `String` |
 
-## DiffKit functions
-
 ### DiffLines
 
 `Public Function DiffLines(oldText As String, newText As String, maxCells As Integer = 1000000) As TextDiff`

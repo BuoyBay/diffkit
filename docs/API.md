@@ -52,17 +52,15 @@ line arrays and operation records. Other storage grows linearly with input size.
 This is intended for source-file comparison; it is not a streaming or binary
 patch implementation, and it does not perform move detection or three-way merge.
 
-## Packaging and verification
+## Package archive
 
-Seal `libraries/diffkit` with `buoy pkg seal ...` and copy the resulting
-`diffkit-0.1.0.buipkg` to a consumer project's `packages/` directory. The source
-module, test, and example pass Buoy compiler checks
-for macOS, Linux and Windows on both supported architectures. The sealed-package
-test runs on Linux and covers empty files, CRLF, Unicode, case-sensitive edits,
-EOF markers, context grouping, defensive copies, stale-base rejection and budget
-limits. It also checks 200 deterministic generated text pairs. Every generated
-patch was independently applied by GNU `patch --binary` and reconstructed the
-exact target bytes. Passing `--fixtures` to the compiled test emits these cases
-as JSON for repeating that independent oracle check.
+The package root contains the source and compiler manifest. A compatible sealer
+can create an archive after any dependency prerequisites are provisioned:
 
-Test suites and fixtures are maintainer-local and are not part of this public repository.
+```sh
+mkdir -p dist
+"${BPM_PACKAGER:-buoy}" pkg seal . -o dist/diffkit-0.1.0.buipkg
+```
+
+Install that archive into the consumer's `packages/` directory, or use BPM to
+build directly from the source checkout. Sealing alone is not a behavioral check.
