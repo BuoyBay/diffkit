@@ -1,4 +1,4 @@
-# Create line diffs and unified patches
+# Line diffs and unified patches
 
 Pure Buoy line comparison for an IDE's compare view, change gutter and patch
 preview. `Import diffkit` brings in `DiffLines`, `TextDiff` and `LineHunk`.

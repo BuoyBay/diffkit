@@ -2,5 +2,5 @@
   "schema": 1,
   "name": "diffkit",
   "version": "0.1.0",
-  "description": "Bounded line diffs, exact text reconstruction and unified patches for developer tools"
+  "description": "Line diffs and unified patches"
 }
